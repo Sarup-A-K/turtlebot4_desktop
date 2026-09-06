@@ -1,0 +1,11 @@
+# colcon / ROS 2 workspace artifacts
+build/
+install/
+log/
+
+# editors
+.vscode/
+*.swp
+
+__pycache__/
+*.pyc

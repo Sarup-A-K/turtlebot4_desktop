@@ -16,5 +16,7 @@ jobs:
         with:
           target-ros2-distro: humble
           import-token: ${{ secrets.GITHUB_TOKEN }}
-          package-name:
+          package-name: |
+            turtlebot4_desktop
             turtlebot4_viz
+            turtlebot4_slam_desktop

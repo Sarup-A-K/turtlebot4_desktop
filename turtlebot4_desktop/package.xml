@@ -10,6 +10,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>turtlebot4_viz</depend>
+  <depend>turtlebot4_slam_desktop</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
