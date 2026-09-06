@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>turtlebot4_slam_desktop</name>
+  <version>1.0.0</version>
+  <description>Offboard SLAM launchers for running slam_toolbox and RViz on a laptop against a networked Turtlebot4</description>
+  <maintainer email="sarup.kumar2005@gmail.com">Sarup Arumugam Kumar</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <depend>turtlebot4_navigation</depend>
+  <depend>slam_toolbox</depend>
+  <depend>turtlebot4_viz</depend>
+  <depend>rviz2</depend>
+  <depend>teleop_twist_joy</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
