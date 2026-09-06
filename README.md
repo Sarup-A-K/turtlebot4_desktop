@@ -11,7 +11,33 @@ For the full official reference, see the
 
 - `turtlebot4_desktop/` — desktop tools for interacting with the robot
 - `turtlebot4_viz/` — RViz visualization configs and launch files
-- Custom algorithm implementations (SLAM, etc.) — **in progress**, added on top of the above
+- `turtlebot4_slam_desktop/` — offboard SLAM: runs `slam_toolbox` and RViz on your PC
+  against a networked robot (see [Offboard SLAM](#offboard-slam) below)
+- More custom algorithm implementations, added on top of the above, land here over time
+
+## Architecture: the PC thinks, the robot executes
+
+This fork moves everything that *decides* onto your PC and leaves the robot's
+Raspberry Pi 4 doing only what it does out of the box — sensor drivers in, motor
+commands out. Nothing runs on the Pi that isn't part of stock TurtleBot 4 bringup.
+
+- **Robot (Raspberry Pi 4)** — stock bringup only. Publishes `/scan` (RPLIDAR), `/odom`
+  and `/tf` (Create 3 base); subscribes to `/cmd_vel` and turns it into wheel motion.
+  It runs no SLAM and originates no motion commands of its own.
+- **PC** — everything else. `slam_toolbox` (via `turtlebot4_slam_desktop`) consumes
+  `/scan` and `/tf` and publishes the `map` → `odom` transform. RViz visualizes it.
+  **Teleop also runs here** — a keyboard or joystick node on the PC is what actually
+  generates `/cmd_vel`.
+
+What crosses the network: `/scan`, `/odom`, `/tf` flow PC-ward from the robot;
+`/cmd_vel` flows robot-ward from the PC. Both directions ride plain ROS 2/DDS discovery
+over a matching `ROS_DOMAIN_ID` and RMW implementation — no bridge, no extra
+infrastructure. It's one ROS graph that happens to span two machines.
+
+**On the robot**, this means: don't launch SLAM, and don't launch teleop there either.
+Two `/cmd_vel` publishers in one graph will fight each other, and the symptom
+(stuttering, ignored commands) reads like a network problem rather than a duplicate
+publisher — so the rule is simply "no teleop, no SLAM, on the Pi, ever."
 
 ## Prerequisites
 
@@ -24,13 +50,17 @@ For the full official reference, see the
 ```bash
 mkdir -p ~/turtlebot4_ws/src
 cd ~/turtlebot4_ws/src
-git clone -b humble https://github.com/Sarup-A-K/turtlebot4_desktop.git
+git clone -b feature/slam-impl https://github.com/Sarup-A-K/turtlebot4_desktop.git
 
 cd ~/turtlebot4_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
 ```
+
+Add `source ~/turtlebot4_ws/install/setup.bash` to your `~/.bashrc`, next to the
+`RMW_IMPLEMENTATION` / `ROS_DOMAIN_ID` exports below — otherwise `ros2 launch` can't
+find these packages in any new shell.
 
 ## Connecting to a real TurtleBot 4
 
@@ -78,11 +108,71 @@ Basic pub/sub discovery can sometimes work even with mismatched RMW implementati
 (both are DDS under the hood), but matching them avoids subtler QoS/discovery issues —
 always set both sides to Cyclone DDS explicitly rather than relying on defaults.
 
-## Custom algorithms (this fork)
+### Clock synchronization
 
-This fork adds custom algorithm implementations on top of the stock packages —
-starting with a SLAM implementation. Each addition will get its own section here
-(what it does, how to launch it, what topics/params it uses) as it lands.
+`slam_toolbox` on your PC stamps incoming scans against your PC's clock while `/tf`
+arrives stamped with the robot's. If the two clocks drift apart, every transform lookup
+fails with `extrapolation into the future` and the map never builds — with no obvious
+hint that the clock is the actual cause.
+
+Check both machines are NTP-synced:
+
+```bash
+timedatectl status | grep "synchronized"   # should say "System clock synchronized: yes"
+```
+
+If the robot has no reliable time source, install `chrony` on it (`sudo apt install
+chrony`) and confirm it syncs. **Treat any TF extrapolation error during bring-up as a
+clock problem first** — it is one of the most common false leads when offboard SLAM
+looks broken but isn't.
+
+## Offboard SLAM
+
+`turtlebot4_slam_desktop` runs `slam_toolbox` and RViz on your PC against a robot that
+is only publishing sensor data and executing `/cmd_vel` — see
+[Architecture](#architecture-the-pc-thinks-the-robot-executes) above for the full split.
+
+It wraps `turtlebot4_navigation`'s stock `slam.launch.py` with a network-tuned params
+file (`config/slam_offboard.yaml`) instead of the default one. Four values differ from
+stock, each because the link between your PC and the robot is WiFi, not a wired LAN:
+
+| Param | Stock | Offboard | Why |
+|---|---|---|---|
+| `transform_timeout` | `0.2` | `0.5` | WiFi latency on `/tf` can exceed 200 ms under load. |
+| `map_update_interval` | `0.5` | `2.0` | `/map` is a full OccupancyGrid; republishing it at 2 Hz is the single biggest bandwidth consumer here. |
+| `minimum_time_interval` | `0.25` | `0.5` | Fewer, better-spaced scans processed; less sensitive to WiFi jitter. |
+| `tf_buffer_duration` | `30.` | `30.` | Unchanged — already generous enough. |
+
+### Launching
+
+```bash
+# Terminal 1 — mapping + viz, on your PC
+ros2 topic hz /scan                                 # confirm live data first
+ros2 launch turtlebot4_slam_desktop slam_desktop.launch.py
+
+# Terminal 2 — control, also on your PC
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+Keyboard teleop is deliberately **not** part of the launch file — `teleop_twist_keyboard`
+reads the terminal's stdin, and a node started by `ros2 launch` doesn't own a TTY. Run it
+by hand in its own terminal, as above. If you use a gamepad instead, pass
+`joy_teleop:=true` to the launch file and skip the second terminal.
+
+Arguments: `namespace` (default `''`), `sync` (default `false` — async slam_toolbox
+tolerates WiFi's irregular scan arrival better than sync), `rviz` (default `true`),
+`joy_teleop` (default `false`), `params` (default `config/slam_offboard.yaml`),
+`use_sim_time` (default `false`).
+
+### Prerequisites on the robot
+
+1. Robot's `ROS_DOMAIN_ID` / `RMW_IMPLEMENTATION` match your PC's — this is what lets
+   `/cmd_vel` reach the robot at all (see [Middleware setup](#middleware-setup-cyclone-dds--ros_domain_id)).
+2. Leave standard bringup running; don't start SLAM or teleop on the robot itself
+   (see [Architecture](#architecture-the-pc-thinks-the-robot-executes)).
+3. Optional but the biggest compute/bandwidth win: disable the OAK-D via
+   `turtlebot4-setup` if you're not using it. SLAM here only needs `/scan`, `/odom`,
+   and `/tf`.
 
 ## Contributing
 
