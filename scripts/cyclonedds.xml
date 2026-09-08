@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Without this file, CycloneDDS's default MaxAutoParticipantIndex is too low for
+  simulation mode: turtlebot4_slam_bringup's mode:=sim brings up 30+ ROS nodes on one
+  domain (Ignition's ros_gz_bridge spawns one parameter_bridge per sensor/topic, plus
+  robot_state_publisher x2, controller_manager, slam_toolbox, the scan filter, etc.).
+
+  Confirmed by running it on this workspace: without this file, every parameter_bridge
+  and several other nodes logged "Failed to find a free participant index for domain 0"
+  and then died with SIGABRT (exit code -6) within a few seconds of launch — this is
+  the exact same failure this project's Jazzy sibling (tb4_slam) hit and fixed the same
+  way. mode:=real, with only ~10 nodes, stays under the default and is unaffected.
+
+  Point CYCLONEDDS_URI at this file before launching mode:=sim (see scripts/aliases.sh's
+  tb4-sim function, and the README's "Simulation mode" section):
+    export CYCLONEDDS_URI=file:///home/nightfury/turtlebot4_ws/src/turtlebot4_desktop/scripts/cyclonedds.xml
+
+  See: https://cyclonedds.io/docs/cyclonedds/latest/config/config_file_reference.html
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <Discovery>
+      <MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

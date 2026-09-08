@@ -1,0 +1,52 @@
+# laser_filters scan_to_scan_filter_chain params. Subscribes /scan, publishes
+# /scan_filtered (both defaults of the node itself). Shared unchanged by both sim and
+# real hardware, which is the entire point of this package: one filtering pass, tuned
+# once. Filter values ported as-is from this project's Jazzy sibling
+# (tb4_slam/turtlebot4_slam_perception), where they were verified against the stock
+# examples shipped with laser_filters and against a running node's actual topic names —
+# re-verify both on this distro before trusting the filter numbers on real scans; the
+# schema itself (filterN-keyed, not the older scan_filter_chain: list form) is what
+# actually matters for the node to load at all.
+#
+# Filters run in filter1 -> filter2 -> filter3 order.
+scan_to_scan_filter_chain:
+  ros__parameters:
+
+    # Drops points caused by the scanner seeing its own mount/chassis at a shallow
+    # angle ("shadow" returns) — angle bounds are generic defaults, not yet tuned to
+    # the TB4's RPLIDAR mount. Revisit once you have real scans to look at.
+    filter1:
+      name: shadows
+      type: laser_filters/ScanShadowsFilter
+      params:
+        min_angle: 10.
+        max_angle: 170.
+        neighbors: 20
+        window: 1
+
+    # Drops isolated single-point returns (dust, insects, sensor noise) that would
+    # otherwise show up in the map as phantom obstacles.
+    filter2:
+      name: speckle
+      type: laser_filters/LaserScanSpeckleFilter
+      params:
+        filter_type: 0            # 0 = range-based (distance between consecutive points)
+        max_range: 12.0           # matches slam_toolbox's max_laser_range in both
+                                   # slam_sim.yaml and turtlebot4_slam_desktop's
+                                   # slam_offboard.yaml
+        max_range_difference: 0.1
+        filter_window: 2
+
+    # Clamps to the RPLIDAR's usable range. lower_threshold above 0 discards points
+    # too close to be trustworthy (mount/chassis reflections); upper_threshold matches
+    # max_range above. Replacement value .inf marks a discarded point as "no return"
+    # rather than a fabricated close-range obstacle.
+    filter3:
+      name: range
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        lower_threshold: 0.06
+        upper_threshold: 12.0
+        lower_replacement_value: .inf
+        upper_replacement_value: .inf

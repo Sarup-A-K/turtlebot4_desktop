@@ -1,0 +1,71 @@
+# robot_localization ekf_node config — opt-in via perception.launch.py's use_ekf:=true.
+#
+# Off by default: normally the Create 3 base broadcasts odom->base_link on /tf itself,
+# and ekf_node would just be a second, redundant publisher of that same transform —
+# tf2 arbitrarily picking between two competing publishers produces a map that
+# jitters/tears in a way that looks exactly like ordinary odometry drift, and is a
+# much harder bug to trace back than to avoid by leaving this off.
+#
+# Turn use_ekf on only if you've confirmed the base is alive and publishing /odom
+# and /imu, yet genuinely never broadcasts the odom->base_link transform. Check
+# that on the robot itself first (`ros2 topic echo /tf` over a few seconds should
+# show a `child_frame_id: base_link` entry) — not just from the laptop.
+#
+# A cautionary tale from this same physical robot, documented in the Jazzy sibling
+# project (tb4_slam/turtlebot4_slam_perception/config/ekf.yaml) when this file was
+# first written there: the symptom looked exactly like "base never broadcasts its
+# transform" — slam_toolbox logged "Message Filter dropping message ... queue is
+# full" on every scan and the map frame never appeared — and an EKF was wired up as
+# the fix. It did nothing, because its own inputs (/odom, /imu) were just as starved
+# as /tf: `ros2 topic hz` on all three returned nothing, even on the Pi. The real
+# cause was that the Create 3's onboard computer was configured for rmw_fastrtps_cpp
+# while the Pi (and laptop) ran rmw_cyclonedds_cpp, and the Pi's CycloneDDS config
+# (/etc/turtlebot4/cyclonedds_rpi.xml) only listened on wlan0 — not usb0, the
+# interface the Create 3 is actually attached over. Switching the Create 3 to
+# CycloneDDS (its web UI, /ros-config) and adding usb0 to that XML brought /odom,
+# /imu and the base's own odom->base_link broadcast back at full rate.
+#
+# That fix was applied to the robot itself, not to any repo, so it should already be
+# in effect here too — this is the same physical Create 3. If /odom, /imu, or the
+# base's own transform are missing again on THIS distro, re-check RMW settings on
+# both sides before reaching for this file; a "missing transform" that comes with
+# missing /odom and /imu is a discovery/RMW problem, not an EKF problem.
+#
+# When it IS genuinely the right tool, note it does NOT disable whatever the base
+# does — if the base's broadcast is intermittent rather than absent, you'll have
+# two publishers of the same transform. If you see position jitter/tearing after
+# turning this on, that's the signal: disable the base's broadcast at the source
+# (irobot_create_control's publish_tf-style parameter, or the Ignition plugin's
+# equivalent) rather than running both.
+#
+# /imu below assumes the Create 3's IMU topic (see irobot_create_description's
+# sensors/imu.urdf.xacro) — confirmed present on this robot in the Jazzy sibling
+# project's testing, but confirm on yours too before relying on it.
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true
+    publish_tf: true
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    odom0: /odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+
+    imu0: /imu
+    imu0_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: true

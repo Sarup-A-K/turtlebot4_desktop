@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>turtlebot4_slam_perception</name>
+  <version>1.0.0</version>
+  <description>Config-only LiDAR/odometry processing for TurtleBot 4 SLAM (ROS 2 Humble): a laser_filters scan_to_scan_filter_chain (/scan -&gt; /scan_filtered) shared by both simulation and real hardware, plus a robot_localization ekf_node scaffold (off by default).</description>
+  <maintainer email="sarup.kumar2005@gmail.com">Sarup Arumugam Kumar</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <depend>laser_filters</depend>
+  <depend>robot_localization</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>turtlebot4_slam_bringup</name>
+  <version>1.0.0</version>
+  <description>Unified sim/real entry point for TurtleBot 4 offboard SLAM (ROS 2 Humble). Toggles between Ignition Fortress simulation and the physical robot via a single `mode` launch argument, without duplicating the SLAM or RViz layer.</description>
+  <maintainer email="sarup.kumar2005@gmail.com">Sarup Arumugam Kumar</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <depend>turtlebot4_slam_desktop</depend>
+  <depend>turtlebot4_slam_sim</depend>
+  <depend>turtlebot4_slam_perception</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
