@@ -45,6 +45,15 @@ Two `/cmd_vel` publishers in one graph will fight each other, and the symptom
 (stuttering, ignored commands) reads like a network problem rather than a duplicate
 publisher — so the rule is simply "no teleop, no SLAM, on the Pi, ever."
 
+> **This ideal does not hold on the current hardware, and the reason is worth knowing
+> before you read further.** The Create 3 base binds its DDS to its USB link to the Pi,
+> so this PC never receives `/odom` or the base's `odom→base_link` — measured, and not
+> fixable from this side. SLAM therefore runs *on the Pi* today, with this PC as the
+> viewer, and teleop runs on the Pi too. See
+> [Real robot: SLAM on the Pi](#real-robot-slam-on-the-pi-viewing-on-the-pc). The split
+> above still describes **simulation mode exactly**, and remains the target for hardware
+> if the base is ever bound to WiFi.
+
 This split is unaffected by simulation mode below — `mode:=sim` replaces the *robot*,
 not the PC. `slam_toolbox` and RViz are the same nodes, reading the same `/scan`/`/tf`,
 whether those topics come from the Pi or from Ignition.
@@ -243,6 +252,11 @@ Loaded by the `scripts/aliases.sh` line above, in every new shell:
 | `tb4-launch-headless` | Same, `rviz:=false` |
 | `tb4-teleop` | `ros2 run teleop_twist_keyboard teleop_twist_keyboard` |
 | `tb4-check` | Self-check for the PC/robot split, prints the active network profile first — see [Offboard SLAM](#offboard-slam) |
+| `tb4-view` | RViz only, TF from the robot's relay — pair with `tb4-pi-slam-start`. See [Real robot](#real-robot-slam-on-the-pi-viewing-on-the-pc) |
+| `tb4-pi-deploy` | one-time `scp` of `tools/pi/topic_relay.py` to the robot |
+| `tb4-pi-slam-start` / `-stop` / `-log` | start / stop / tail `slam_toolbox` + the `/tf` relay **on the robot** |
+| `tb4-pi-teleop` | keyboard teleop running *on the robot* over `ssh -t` — the one that actually drives it |
+| `tb4-pi-lidar-restart` | restart robot bringup after plugging the lidar in, then report `/scan` publishers |
 
 ## Connecting to a real TurtleBot 4
 
@@ -355,6 +369,96 @@ tolerates WiFi's irregular scan arrival better than sync), `rviz` (default `true
 3. Optional but the biggest compute/bandwidth win: disable the OAK-D via
    `turtlebot4-setup` if you're not using it. SLAM here only needs `/scan`, `/odom`,
    and `/tf`.
+
+## Real robot: SLAM on the Pi, viewing on the PC
+
+**This is the mode that actually works on this hardware today**, and the reason is a
+network-topology fact, not a bug in anything here:
+
+> The Create 3 base binds its DDS to the **USB link to the Raspberry Pi only**. The Pi
+> sees `/odom`, `/imu`, `/motion_control` and the base's `odom→base_link` transform
+> perfectly. This PC sees **none of them** — `/odom` has 0 publishers here, and
+> `odom→base_link` never resolves. Measured directly, including with the base added as
+> an explicit CycloneDDS *unicast peer* at its own WiFi address, which still changed
+> nothing. The base is reachable by IP (it answers pings and serves its web UI on
+> WiFi); it simply does not speak DDS over that interface.
+
+Laptop-side SLAM (`mode:=real`) therefore cannot work as-is: `slam_toolbox` here would
+receive `/scan` but never the transform that places those scans, so it would drop every
+one of them. Running `slam_toolbox` **on the Pi** keeps all of its time-critical inputs
+(`/scan`, `/odom`, `/tf`) local to the robot. Only the small, low-rate `/map` and the
+`map→odom` transform cross WiFi to RViz here.
+
+```bash
+tb4-pi-deploy          # once: scp tools/pi/topic_relay.py to the robot
+tb4-pi-slam-start      # ssh: start slam_toolbox + the /tf relay on the robot
+tb4-real && tb4-view   # RViz ONLY here (mode:=view tf_relay:=true) — no local slam_toolbox
+tb4-pi-teleop          # drive: keyboard teleop running ON the robot, over ssh -t
+tb4-pi-slam-log        # tail both robot-side logs
+tb4-pi-slam-stop       # stop both when done
+```
+
+These use SSH key auth — run `ssh-copy-id ubuntu@10.85.219.141` once. Override the
+address with `TB4_ROBOT_IP=…`.
+
+**Do not run `tb4-real-launch` or `tb4-launch` while Pi-side SLAM is running.** Both
+start a second `slam_toolbox` here, and the two would fight over `map→odom`. `tb4-view`
+exists precisely so there is a PC-side entry point that can't.
+
+### Why there's a `/tf` relay
+
+Even with SLAM on the Pi, RViz here still needs `odom→base_link` to place the robot and
+its scans — and that transform is published by the Create 3, behind the USB link. Without
+it RViz renders the map fine but reports *"two or more unconnected trees"* and draws no
+robot. `tools/pi/topic_relay.py` (started by `tb4-pi-slam-start`) republishes everything
+on the robot's `/tf` as `/tf_relay` from a **Pi-hosted** node, which this PC discovers
+reliably, and `tb4-view` passes `tf_relay:=true` so RViz reads that instead.
+
+`/tf_static` needs no relay — the Pi's own `robot_state_publisher` publishes it
+TRANSIENT_LOCAL and this PC receives it directly. Teleop is the same story in the other
+direction: the base's `/cmd_vel` subscriber is behind the same USB link (`tb4-check`
+shows `Subscription count: 0` here), which is why `tb4-pi-teleop` runs
+`teleop_twist_keyboard` *on the Pi* over `ssh -t` rather than locally.
+
+Pi-side SLAM deliberately uses `turtlebot4_navigation`'s **stock** `slam.yaml`. This
+project's `slam_offboard.yaml` tuning (`transform_timeout: 0.5`,
+`map_update_interval: 2.0`) exists to absorb a WiFi hop between sensor and SLAM — a hop
+that doesn't exist when SLAM runs on the robot.
+
+### Plug the lidar in *before* starting the robot
+
+The `rplidar` driver probes `/dev/ttyUSB0` once at bringup. A lidar connected afterwards
+stays dead even though the device node exists and `turtlebot4.service` is `active`. The
+signature is unmistakable once you've seen it: `/scan` has **0 publishers**, no
+`/rplidar_composition` node, the robot's own `/diagnostics_agg` reports `Lidar: Error`,
+and `/start_motor` hangs (that service is a proxy on `turtlebot4_node`; the real lidar
+node isn't there to answer). Fix:
+
+```bash
+tb4-pi-lidar-restart     # sudo systemctl restart turtlebot4.service, then reports /scan publishers
+```
+
+### "Extrapolation into the future" in RViz is cosmetic here
+
+With the relay, RViz logs occasional `Lookup would require extrapolation into the
+future … latest data is at …` — typically ~100 ms behind. On this setup that is the
+relay's network hop over campus WiFi (measured ping jitter: 3–384 ms), not clock drift;
+both machines report `System clock synchronized: yes`.
+
+It matters that this is **only** a visualization artifact: `slam_toolbox` runs on the
+Pi, where `/scan` and `/tf` are local and instantaneous, so map quality is unaffected by
+it. That immunity is the main thing this architecture buys. If both machines were *not*
+NTP-synced the story would be different — see
+[Clock synchronization](#clock-synchronization).
+
+### The alternative not taken
+
+The Create 3's web UI (`http://<robot-ip>:8080/ros-config` → *Override RMW Profile*)
+can be given a CycloneDDS profile that binds its WiFi interface as well as usb0. That
+would restore true "PC thinks, robot executes" with no relay at all. It was not done
+here because it puts the base's full telemetry on campus WiFi and requires a
+robot-side change to a shared machine. The relay achieves the same visibility with
+nothing on the base touched.
 
 ## Contributing
 

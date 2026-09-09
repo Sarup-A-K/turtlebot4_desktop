@@ -112,6 +112,20 @@ ARGUMENTS = [
                                       'transform (ros2 topic echo /tf shows no '
                                       'base_link child frame) — see '
                                       'turtlebot4_slam_perception/config/ekf.yaml.'),
+    DeclareLaunchArgument('tf_relay', default_value='false',
+                          choices=['true', 'false'],
+                          description='mode:=view only. Read TF from /tf_relay (the '
+                                      "Pi-hosted relay of the robot's /tf, started by "
+                                      'tb4-pi-slam-start) instead of /tf. Required when '
+                                      'SLAM runs on the Pi: the Create 3 publishes '
+                                      'odom->base_link over its USB link to the Pi only, '
+                                      "so that transform never reaches this machine — "
+                                      'measured directly, including with the base as an '
+                                      'explicit CycloneDDS unicast peer. Without the '
+                                      'relay RViz renders the map but reports "two or '
+                                      'more unconnected trees" and draws no robot. '
+                                      'Leave false if the relay is not running: RViz '
+                                      'would then get no TF at all.'),
 ]
 # use_sim_time is deliberately NOT a launch argument here — it is derived from `mode`
 # only (see MODES above). See the module docstring: this dodges a real, previously-hit
@@ -128,12 +142,18 @@ def launch_setup(context, *args, **kwargs):
 
     if mode == 'view':
         # Viewer only: RViz with the shared mapping display config, nothing else. No
-        # slam_toolbox, no scan filter, no sim — SLAM is expected to be running
-        # elsewhere (the Pi-side fallback, if this distro-matched setup still needs
-        # it — see the top-level README). Mirrors slam_desktop.launch.py's RViz node
-        # so the display config, namespace handling and /tf remaps stay identical; it
-        # just doesn't drag slam_toolbox along with it, which would start a second
-        # publisher of map->odom on the laptop and fight whatever else is running.
+        # slam_toolbox, no scan filter, no sim — SLAM is expected to be running on the
+        # robot (tb4-pi-slam-start). Mirrors slam_desktop.launch.py's RViz node so the
+        # display config, namespace handling and /tf remaps stay identical; it just
+        # doesn't drag slam_toolbox along with it, which would start a second publisher
+        # of map->odom on this machine and fight the robot's.
+        #
+        # tf_relay: read the Pi-hosted relay of the robot's /tf instead of /tf itself.
+        # /tf_static is deliberately left alone — it's published by the Pi's own
+        # robot_state_publisher (TRANSIENT_LOCAL) and this machine receives it directly;
+        # only the Create 3's odom->base_link, which never leaves the robot's USB link,
+        # needs relaying. See the tf_relay argument's description.
+        tf_relay = LaunchConfiguration('tf_relay').perform(context) == 'true'
         pkg_desktop = get_package_share_directory('turtlebot4_slam_desktop')
         rviz2_config = PathJoinSubstitution([pkg_desktop, 'rviz', 'slam.rviz'])
         return [GroupAction([
@@ -144,7 +164,7 @@ def launch_setup(context, *args, **kwargs):
                  arguments=['-d', rviz2_config],
                  parameters=[{'use_sim_time': use_sim_time == 'true'}],
                  remappings=[
-                    ('/tf', 'tf'),
+                    ('/tf', 'tf_relay' if tf_relay else 'tf'),
                     ('/tf_static', 'tf_static'),
                  ],
                  output='screen'),
