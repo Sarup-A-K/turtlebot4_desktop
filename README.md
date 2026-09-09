@@ -76,6 +76,12 @@ separate argument, so the two can't be set inconsistently — see the comment ab
 `MODES` in `turtlebot4_slam_bringup/launch/tb4_slam.launch.py` for the (previously hit,
 now-avoided) `LaunchConfiguration` bug this dodges.
 
+**Give the controllers ~10 s after launch before driving.** `diffdrive_controller` is
+loaded and activated by a spawner a few seconds after the world comes up; `/cmd_vel`
+sent before that is silently ignored (the topic has a subscriber, the robot just doesn't
+move — confirmed while testing). If teleop seems dead right after launch, wait, or check
+`ros2 control list_controllers` shows `diffdrive_controller ... active`.
+
 `turtlebot4_slam_desktop`/`tb4-launch` (the original hardware-only entry point) is
 untouched and still works exactly as documented below — `tb4_slam.launch.py` is
 additive, not a replacement.
@@ -123,6 +129,29 @@ Both functions run `ros2 daemon stop`, because the ROS 2 daemon caches discovery
 domain: without restarting it, `ros2 topic list` etc. keep reporting the *previous*
 profile's topics after switching, which reads like a network fault rather than a stale
 daemon. `tb4-check` prints the active profile first for exactly this reason.
+
+### GPU rendering on hybrid Intel/NVIDIA laptops
+
+Ignition's lidar is a **GPU** sensor — it raycasts through an OGRE render context. On a
+laptop with both an Intel iGPU and an NVIDIA dGPU (this project's dev machine: Intel +
+RTX 5050, Wayland), a plain `ros2 launch` puts that context on the Intel/Mesa path, EGL
+fails with `libEGL warning: egl: failed to create dri2 screen`, and the GPU lidar
+returns `range_min` for **every** beam. `slam_toolbox` then does exactly the right thing
+with 640 sub-minimum points per scan — discards them all — so you get a map stuck at
+its 7×7 initial size, the robot driving around fine, and **no warning anywhere**. It is
+one of the quietest failures in this whole stack.
+
+`tb4-sim` fixes it by exporting `__NV_PRIME_RENDER_OFFLOAD=1` and
+`__GLX_VENDOR_LIBRARY_NAME=nvidia`, which pins the render context to the NVIDIA GPU.
+Harmless on single-GPU machines. Two ways to confirm it took, in order of speed:
+
+```bash
+nvidia-smi | grep gazebo          # 'ign gazebo server' must be listed — if absent, this is your problem
+ros2 topic echo /scan --once --full-length | grep -c "^- 0.16"   # ~0 healthy; ~640 = all beams at range_min
+```
+
+If a `mode:=sim` map never grows but the robot moves and nothing logs an error, check
+this before anything else.
 
 ### CycloneDDS participant limit
 

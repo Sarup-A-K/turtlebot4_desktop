@@ -53,6 +53,15 @@ tb4-sim() {
   # the network. IGN_PARTITION scopes it to this user, IGN_IP pins it to loopback.
   export IGN_PARTITION="tb4slam_${USER}"
   export IGN_IP=127.0.0.1
+  # Hybrid Intel-iGPU + NVIDIA laptop (this dev machine): without PRIME offload the
+  # Ignition server's sensor render context lands on the Intel/Mesa path, EGL fails
+  # ("failed to create dri2 screen"), and the GPU lidar returns range_min for every
+  # beam. slam_toolbox then silently discards all 640 points per scan — no map, no
+  # warning. Confirmed directly: nvidia-smi showed no gazebo process before, and the
+  # lidar read 0.164 m in all directions; with these two vars the server appears on
+  # the GPU and the scan reads real geometry (1–12 m). Harmless on single-GPU boxes.
+  export __NV_PRIME_RENDER_OFFLOAD=1
+  export __GLX_VENDOR_LIBRARY_NAME=nvidia
   # Raises CycloneDDS's MaxAutoParticipantIndex — mode:=sim launches 30+ nodes on one
   # domain and, without this, hits "Failed to find a free participant index" and a
   # node dies (SIGABRT) — confirmed directly while building this. mode:=real (~10
@@ -66,6 +75,7 @@ tb4-real() {
   # Must match the robot's ROS_DOMAIN_ID (see the README's Middleware setup section).
   export ROS_DOMAIN_ID=0
   unset ROS_LOCALHOST_ONLY IGN_PARTITION IGN_IP CYCLONEDDS_URI
+  unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME
   ros2 daemon stop >/dev/null 2>&1
   echo "profile: REAL  domain=$ROS_DOMAIN_ID"
 }
