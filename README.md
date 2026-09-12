@@ -4,6 +4,9 @@ Packages for interacting with TurtleBot 4 from a PC — forked from
 [turtlebot/turtlebot4_desktop](https://github.com/turtlebot/turtlebot4_desktop) to add custom
 algorithm implementations (SLAM and others) on top of the official packages.
 
+**Just want to run it?** See [RUNBOOK.md](RUNBOOK.md) for the step-by-step operating
+sequence. This README covers the architecture and the reasoning behind it.
+
 For the full official reference, see the
 [TurtleBot 4 User Manual](https://turtlebot.github.io/turtlebot4-user-manual/software/turtlebot4_packages.html).
 
